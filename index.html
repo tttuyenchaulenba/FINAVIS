@@ -32,8 +32,8 @@
     <div class="container">
         <div class="header">
             <h1>FINAVIS – INVESTMENT MANAGEMENT SYSTEM</h1>
-            <p>Hệ thống phân tích đa phương thức kết hợp Mô hình học máy Stacking & Định lượng cảm xúc tin tức (LLM)</p>
-            <div class="sub">Phát triển ứng dụng Fintech</div>
+            <p>Hệ thống phân tích đa phương thức kết hợp Mô hình học máy Stacking & Định lượng cảm xúc tin tức (SLM)</p>
+            <div class="sub">Nghiên cứu phát triển ứng dụng Fintech (Hỗ trợ Pan/Zoom Dữ liệu 2019 - Present)</div>
         </div>
 
         <div id="loading-status" class="loading">⏳ Đang tự động kết nối và nạp dữ liệu từ hệ thống...</div>
@@ -41,7 +41,7 @@
         <div class="control-panel" id="control-panel" style="display:none;">
             <label style="font-size:13px; font-weight:bold; color:#38bdf8;">📊 Chọn các mã CP (Giữ Ctrl/Cmd để chọn nhiều mã):</label>
             <select id="ticker-select" multiple></select>
-            <span style="color: #64748b; font-size: 11px; font-style: italic;">*Mẹo: Giữ phím Ctrl (Windows) hoặc Cmd (Mac) để chọn/bỏ chọn nhiều mã cùng lúc.</span>
+            <span style="color: #64748b; font-size: 11px; font-style: italic;">*Mẹo: Giữ phím Ctrl (Windows) hoặc Cmd (Mac) để chọn/bỏ chọn nhiều mã cùng lúc. Cuộn chuột trên biểu đồ để xem lịch sử từ 2019.</span>
         </div>
 
         <div id="metrics-panel"></div>
@@ -51,7 +51,6 @@
     <script>
         let rawPrices = [], rawSentiment = [];
 
-        // Hàm chuẩn hóa chuỗi Date về định dạng YYYY-MM-DD
         function cleanDate(dStr) {
             if (!dStr) return '';
             let d = new Date(dStr);
@@ -67,7 +66,6 @@
                 rawPrices = Papa.parse(pricesCsv, { header: true, dynamicTyping: true, skipEmptyLines: true }).data;
                 rawSentiment = Papa.parse(sentimentCsv, { header: true, dynamicTyping: true, skipEmptyLines: true }).data;
                 
-                // Chuẩn hóa Date
                 rawPrices.forEach(d => { d.Date = cleanDate(d.Date); });
                 rawSentiment.forEach(d => { d.Date = cleanDate(d.Date); });
 
@@ -124,7 +122,6 @@
                 let dfS = rawSentiment.filter(d => d.Ticker === ticker);
                 if (dfP.length === 0) return;
 
-                // Áp ánh xạ Sentiment theo Ngày
                 let sentMap = {};
                 dfS.forEach(s => { 
                     if (s.Date && s.Sentiment_Score !== undefined) {
@@ -135,12 +132,11 @@
                 dfP = calculateIndicators(dfP);
                 
                 let predictedList = [];
-                let lastValidSentiment = 0.05; // Khởi tạo điểm mặc định
+                let lastValidSentiment = 0.05;
 
                 for (let i = 0; i < dfP.length; i++) {
                     let dateStr = dfP[i].Date;
                     
-                    // Nếu ngày đó có điểm Sentiment thì lấy trung bình, nếu không có thì lấy điểm của ngày trước đó (Smoothing)
                     if (sentMap[dateStr] && sentMap[dateStr].length > 0) {
                         let avg = sentMap[dateStr].reduce((a,b) => a+b, 0) / sentMap[dateStr].length;
                         dfP[i].Sentiment_Score = Number(avg.toFixed(2));
@@ -165,7 +161,8 @@
                     dfP[i].Predicted_Display = i > 0 ? predictedList[i-1] : dfP[i].Close;
                 }
 
-                combined[ticker] = dfP.slice(-30);
+                // ĐÃ SỬA: Giữ toàn bộ mảng lịch sử từ 2019 thay vì dùng .slice(-30)
+                combined[ticker] = dfP;
             });
             return combined;
         }
@@ -207,14 +204,16 @@
 
             let traces = [];
             let colors = ['#38bdf8', '#10b981', '#ef4444', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f43f5e'];
+            let globalDates = [];
 
             selectedTickers.forEach((ticker, idx) => {
                 if (!results[ticker]) return;
                 let df = results[ticker];
                 let color = colors[idx % colors.length];
                 let dates = df.map(d => d.Date);
+                if (dates.length > globalDates.length) globalDates = dates;
 
-                // Subplot 1 (Trục y1 - Giá)
+                // Subplot 1 (Giá)
                 traces.push({ 
                     x: dates, y: df.map(d => d.Close), 
                     mode: 'lines', name: `${ticker} (Thực tế)`, 
@@ -228,26 +227,34 @@
                     showlegend: false, xaxis: 'x', yaxis: 'y' 
                 });
 
-                // Subplot 2 (Trục y2 - Sentiment Score)
+                // Subplot 2 (Sentiment Score)
                 traces.push({ 
                     x: dates, y: df.map(d => d.Sentiment_Score), 
                     mode: 'lines+markers', name: `Tâm lý ${ticker}`, 
                     line: { color: color, width: 1.5 }, 
-                    marker: { size: 4 },
+                    marker: { size: 3 },
                     xaxis: 'x', yaxis: 'y2' 
                 });
             });
+
+            // Tính mốc ngày mặc định hiển thị (30 phiên gần nhất)
+            let defaultStartIndex = Math.max(0, globalDates.length - 30);
+            let defaultStart = globalDates[defaultStartIndex];
+            let defaultEnd = globalDates[globalDates.length - 1];
 
             let layout = {
                 grid: { rows: 2, columns: 1, pattern: 'independent', roworder: 'top to bottom' },
                 height: 550, template: 'plotly_white', margin: { l: 50, r: 20, t: 30, b: 30 },
                 legend: { orientation: 'h', yanchor: 'bottom', y: 1.02, xanchor: 'right', x: 1 },
-                xaxis: { type: 'category' },
+                xaxis: { 
+                    type: 'date',
+                    range: [defaultStart, defaultEnd] // Chỉ zoom mặc định ở 30 phiên gần nhất, kéo ra vẫn xem được từ 2019
+                },
                 yaxis: { title: 'Giá đóng cửa (VNĐ)', domain: [0.36, 1] },
                 yaxis2: { title: 'Điểm SLM (-1 đến 1)', domain: [0, 0.26], range: [-1.1, 1.1] }
             };
 
-            Plotly.newPlot('plotly-chart', traces, layout, { responsive: true });
+            Plotly.newPlot('plotly-chart', traces, layout, { responsive: true, scrollZoom: true });
         }
     </script>
 </body>
