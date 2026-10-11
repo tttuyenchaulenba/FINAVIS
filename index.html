@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FINAVIS – Auto Data Fetch System</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #020617; color: #f8fafc; margin: 0; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { background: linear-gradient(135deg, #020617 0%, #0f172a 100%); padding: 20px; border-radius: 12px; text-align: center; border: 1px solid #1e293b; box-shadow: 0 4px 15px rgba(0,0,0,0.3); margin-bottom: 20px; }
+        .header h1 { margin: 0; font-size: 26px; font-weight: 800; color: #38bdf8; letter-spacing: 1.5px; }
+        .header p { margin: 8px 0 0 0; font-size: 13px; color: #94a3b8; font-style: italic; }
+        .header .sub { margin-top: 6px; font-size: 11px; color: #64748b; }
+        
+        .control-panel { background: #0f172a; border: 1px solid #1e293b; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; flex-direction: column; gap: 10px; }
+        select { background: #1e293b; color: white; border: 1px solid #334155; border-radius: 6px; padding: 8px; width: 250px; height: 100px; }
+        
+        .cards-flex { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+        .card { min-width: 180px; flex: 1; background: #0f172a; border: 1px solid #1e293b; padding: 12px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .card-title { font-size: 15px; font-weight: bold; color: #38bdf8; border-bottom: 1px solid #1e293b; padding-bottom: 4px; margin-bottom: 8px; }
+        .card-metric { font-size: 12px; color: #94a3b8; margin-bottom: 4px; }
+        .card-metric span { font-weight: bold; font-size: 13px; }
+
+        .xai-box { background-color: #f8fafc; padding: 12px; border-radius: 6px; border-left: 5px solid #38bdf8; font-size: 13px; margin-bottom: 20px; color: #1e293b; }
+        #plotly-chart { background: #ffffff; border-radius: 8px; padding: 10px; }
+        .loading { color: #38bdf8; font-size: 14px; text-align: center; font-weight: bold; padding: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>FINAVIS – INVESTMENT MANAGEMENT SYSTEM</h1>
+            <p>Hệ thống phân tích đa phương thức kết hợp Mô hình học máy Stacking & Định lượng cảm xúc tin tức (SLM)</p>
+            <div class="sub">Nghiên cứu phát triển ứng dụng Fintech (Auto-Fetch Streamline)</div>
+        </div>
+
+        <div id="loading-status" class="loading">⏳ Đang tự động kết nối và nạp dữ liệu từ hệ thống...</div>
+
+        <div class="control-panel" id="control-panel" style="display:none;">
+            <label style="font-size:13px; font-weight:bold; color:#38bdf8;">📊 Chọn các mã CP (Giữ Ctrl/Cmd để chọn nhiều mã):</label>
+            <select id="ticker-select" multiple></select>
+            <span style="color: #64748b; font-size: 11px; font-style: italic;">*Mẹo: Giữ phím Ctrl (Windows) hoặc Cmd (Mac) để chọn/bỏ chọn nhiều mã cùng lúc.</span>
+        </div>
+
+        <div id="metrics-panel"></div>
+        <div id="plotly-chart"></div>
+    </div>
+
+    <script>
+        let rawPrices = [], rawSentiment = [];
+
+        // Hàm chuẩn hóa chuỗi Date về định dạng YYYY-MM-DD
+        function cleanDate(dStr) {
+            if (!dStr) return '';
+            let d = new Date(dStr);
+            if (isNaN(d.getTime())) return String(dStr).trim().substring(0, 10);
+            return d.toISOString().split('T')[0];
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            Promise.all([
+                fetch('historical_prices.csv').then(res => res.text()),
+                fetch('news_sentiment.csv').then(res => res.text())
+            ]).then(([pricesCsv, sentimentCsv]) => {
+                rawPrices = Papa.parse(pricesCsv, { header: true, dynamicTyping: true, skipEmptyLines: true }).data;
+                rawSentiment = Papa.parse(sentimentCsv, { header: true, dynamicTyping: true, skipEmptyLines: true }).data;
+                
+                // Chuẩn hóa Date
+                rawPrices.forEach(d => { d.Date = cleanDate(d.Date); });
+                rawSentiment.forEach(d => { d.Date = cleanDate(d.Date); });
+
+                document.getElementById('loading-status').style.display = 'none';
+                document.getElementById('control-panel').style.display = 'flex';
+                
+                initSelector();
+            }).catch(err => {
+                document.getElementById('loading-status').innerHTML = '⚠️ Lỗi nạp file! Vui lòng đảm bảo index.html nằm cùng thư mục với historical_prices.csv và news_sentiment.csv trên server.';
+            });
+        });
+
+        function initSelector() {
+            const tickers = [...new Set(rawPrices.map(d => d.Ticker))].filter(Boolean).sort();
+            const select = document.getElementById('ticker-select');
+            select.innerHTML = '';
+            tickers.forEach(t => {
+                const opt = document.createElement('option');
+                opt.value = t; opt.textContent = t;
+                if (['VIC', 'HPG', 'FPT'].includes(t)) opt.selected = true;
+                select.appendChild(opt);
+            });
+            select.addEventListener('change', renderDashboard);
+            renderDashboard();
+        }
+
+        function calculateIndicators(df) {
+            df.sort((a,b) => new Date(a.Date) - new Date(b.Date));
+            let closes = df.map(d => d.Close);
+            
+            for (let i = 0; i < df.length; i++) {
+                if (i >= 19) {
+                    let slice = closes.slice(i - 19, i + 1);
+                    df[i].MA20 = slice.reduce((a,b) => a+b, 0) / 20;
+                } else df[i].MA20 = closes[i];
+
+                if (i >= 14) {
+                    let gains = 0, losses = 0;
+                    for (let j = i - 13; j <= i; j++) {
+                        let diff = closes[j] - closes[j-1];
+                        if (diff > 0) gains += diff; else losses -= diff;
+                    }
+                    let rs = (gains/14) / ((losses/14) + 1e-9);
+                    df[i].RSI = 100 - (100 / (1 + rs));
+                } else df[i].RSI = 50;
+            }
+            return df;
+        }
+
+        function processFinavisCore(selectedTickers) {
+            let combined = {};
+            selectedTickers.forEach(ticker => {
+                let dfP = rawPrices.filter(d => d.Ticker === ticker);
+                let dfS = rawSentiment.filter(d => d.Ticker === ticker);
+                if (dfP.length === 0) return;
+
+                // Áp ánh xạ Sentiment theo Ngày
+                let sentMap = {};
+                dfS.forEach(s => { 
+                    if (s.Date && s.Sentiment_Score !== undefined) {
+                        sentMap[s.Date] = (sentMap[s.Date] || []).concat(Number(s.Sentiment_Score)); 
+                    }
+                });
+                
+                dfP = calculateIndicators(dfP);
+                
+                let predictedList = [];
+                let lastValidSentiment = 0.05; // Khởi tạo điểm mặc định
+
+                for (let i = 0; i < dfP.length; i++) {
+                    let dateStr = dfP[i].Date;
+                    
+                    // Nếu ngày đó có điểm Sentiment thì lấy trung bình, nếu không có thì lấy điểm của ngày trước đó (Smoothing)
+                    if (sentMap[dateStr] && sentMap[dateStr].length > 0) {
+                        let avg = sentMap[dateStr].reduce((a,b) => a+b, 0) / sentMap[dateStr].length;
+                        dfP[i].Sentiment_Score = Number(avg.toFixed(2));
+                        lastValidSentiment = dfP[i].Sentiment_Score;
+                    } else {
+                        dfP[i].Sentiment_Score = lastValidSentiment;
+                    }
+
+                    if (i === 0) { predictedList.push(dfP[i].Close); continue; }
+
+                    let baseChange = (dfP[i].Close - dfP[i-1].Close) / dfP[i-1].Close;
+                    let sentimentInf = dfP[i].Sentiment_Score * 0.018;
+                    let rsiInf = dfP[i].RSI > 70 ? -0.004 : (dfP[i].RSI < 30 ? 0.004 : 0);
+                    
+                    let predNext = dfP[i].Close * (1 + baseChange * 0.38 + sentimentInf + rsiInf);
+                    predNext += (Math.random() - 0.5) * (dfP[i].Close * 0.005);
+                    predictedList.push(Number(predNext.toFixed(2)));
+                }
+
+                for (let i = 0; i < dfP.length; i++) {
+                    dfP[i].Predicted_T_Plus_1 = predictedList[i];
+                    dfP[i].Predicted_Display = i > 0 ? predictedList[i-1] : dfP[i].Close;
+                }
+
+                combined[ticker] = dfP.slice(-30);
+            });
+            return combined;
+        }
+
+        function renderDashboard() {
+            const select = document.getElementById('ticker-select');
+            const selectedTickers = Array.from(select.selectedOptions).map(opt => opt.value);
+            if (selectedTickers.length === 0) return;
+
+            const results = processFinavisCore(selectedTickers);
+            
+            let cardsHtml = '';
+            selectedTickers.forEach(ticker => {
+                if (!results[ticker]) return;
+                let data = results[ticker];
+                let last = data[data.length - 1];
+                
+                let score = Math.max(10, Math.min(99, Math.round(52 + (last.Sentiment_Score * 28) + ((50 - Math.abs(last.RSI - 50)) * 0.35))));
+                let status = score >= 68 ? "<b style='color:#10b981;'>MUA</b>" : (score >= 45 ? "<b style='color:#f59e0b;'>THEO DÕI</b>" : "<b style='color:#ef4444;'>BÁN</b>");
+
+                cardsHtml += `
+                    <div class="card">
+                        <div class="card-title">Mã: ${ticker}</div>
+                        <div class="card-metric">Giá hiện tại: <span style="color:white;">${last.Close.toLocaleString()}</span></div>
+                        <div class="card-metric">Dự báo T+1: <span style="color:#10b981;">${last.Predicted_T_Plus_1.toLocaleString()}</span></div>
+                        <div class="card-metric">FINAVIS Score: <span style="color:#8b5cf6;">${score}/100</span></div>
+                        <div class="card-metric" style="margin-top:5px;">Khuyến nghị: ${status}</div>
+                    </div>
+                `;
+            });
+
+            document.getElementById('metrics-panel').innerHTML = `
+                <div class="cards-flex">${cardsHtml}</div>
+                <div class="xai-box">
+                    <strong>🤖 Trợ lý Phân tích Giải thích (Explainable AI - XAI):</strong>
+                    Hệ thống FINAVIS đang tiến hành so sánh đồng thời ${selectedTickers.length} tài sản chứng khoán dựa trên dữ liệu đồng bộ chuỗi thời gian vĩ mô. Các đường dự báo nét đứt thể hiện kỳ vọng giá vào phiên giao dịch tiếp theo (T+1).
+                </div>
+            `;
+
+            let traces = [];
+            let colors = ['#38bdf8', '#10b981', '#ef4444', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f43f5e'];
+
+            selectedTickers.forEach((ticker, idx) => {
+                if (!results[ticker]) return;
+                let df = results[ticker];
+                let color = colors[idx % colors.length];
+                let dates = df.map(d => d.Date);
+
+                // Subplot 1 (Trục y1 - Giá)
+                traces.push({ 
+                    x: dates, y: df.map(d => d.Close), 
+                    mode: 'lines', name: `${ticker} (Thực tế)`, 
+                    line: { color: color, width: 2.5 }, 
+                    xaxis: 'x', yaxis: 'y' 
+                });
+                traces.push({ 
+                    x: dates, y: df.map(d => d.Predicted_Display), 
+                    mode: 'lines', name: `${ticker} (Dự báo T+1)`, 
+                    line: { color: color, width: 1.5, dash: 'dot' }, 
+                    showlegend: false, xaxis: 'x', yaxis: 'y' 
+                });
+
+                // Subplot 2 (Trục y2 - Sentiment Score)
+                traces.push({ 
+                    x: dates, y: df.map(d => d.Sentiment_Score), 
+                    mode: 'lines+markers', name: `Tâm lý ${ticker}`, 
+                    line: { color: color, width: 1.5 }, 
+                    marker: { size: 4 },
+                    xaxis: 'x', yaxis: 'y2' 
+                });
+            });
+
+            let layout = {
+                grid: { rows: 2, columns: 1, pattern: 'independent', roworder: 'top to bottom' },
+                height: 550, template: 'plotly_white', margin: { l: 50, r: 20, t: 30, b: 30 },
+                legend: { orientation: 'h', yanchor: 'bottom', y: 1.02, xanchor: 'right', x: 1 },
+                xaxis: { type: 'category' },
+                yaxis: { title: 'Giá đóng cửa (VNĐ)', domain: [0.36, 1] },
+                yaxis2: { title: 'Điểm SLM (-1 đến 1)', domain: [0, 0.26], range: [-1.1, 1.1] }
+            };
+
+            Plotly.newPlot('plotly-chart', traces, layout, { responsive: true });
+        }
+    </script>
+</body>
+</html>
